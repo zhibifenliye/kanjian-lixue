@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>看见力学 · 梁的弯曲（初步演示）</title>
+<style>
+  :root {
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;  /* blue   — 剪力 V */
+    --series-2: #eb6834;  /* orange — 弯矩 M */
+    --series-3: #1baf7a;  /* aqua   — 挠度 w（解析解） */
+    --series-4: #eb6834;  /* orange — 数值解（虚线） */
+    --deform: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #d95926;
+      --deform: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    line-height: 1.5;
+  }
+  header {
+    padding: 20px 28px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: 650; }
+  header .sub { margin: 4px 0 0; color: var(--text-secondary); font-size: 14px; }
+  main { padding: 20px 28px 40px; max-width: 1120px; margin: 0 auto; }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 18px; }
+
+  .field-group { display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-start; }
+  .seg { display: flex; flex-direction: column; gap: 6px; }
+  .seg > label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .seg-btns { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg-btns button {
+    border: none; background: transparent; padding: 7px 14px; cursor: pointer;
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .seg-btns button + button { border-left: 1px solid var(--border); }
+  .seg-btns button.active { background: var(--series-1); color: #fff; }
+
+  .slider { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .slider > label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .slider .val { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .slider input[type=range] { width: 100%; accent-color: var(--series-1); }
+  .slider.hidden { display: none; }
+
+  .checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+  .checkbox input { accent-color: var(--series-1); width: 16px; height: 16px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { font-size: 12px; color: var(--text-muted); }
+  .tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .u { font-size: 11px; color: var(--text-muted); }
+
+  figure { margin: 0 0 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px 6px; }
+  figure figcaption { font-size: 13px; font-weight: 600; color: var(--text-primary); padding: 2px 6px 6px; }
+  figure figcaption .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  figure canvas { display: block; width: 100%; height: 210px; cursor: crosshair; }
+  figure .legend { font-size: 12px; color: var(--text-secondary); padding: 4px 6px 2px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .legend .it { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .ln { display: inline-block; width: 16px; height: 2px; }
+
+  .note { font-size: 12.5px; color: var(--text-secondary); }
+  .note code { background: var(--grid); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .err-good { color: #0ca30c; font-weight: 650; }
+</style>
+</head>
+<body>
+<header>
+  <h1>看见力学 · 梁的弯曲</h1>
+  <div class="sub">荷载 → 内力 → 变形 全链条交互可视化（初步演示版）· Euler-Bernoulli 梁，线弹性 / 小变形</div>
+</header>
+
+<main>
+  <!-- 控制面板 -->
+  <div class="panel">
+    <div class="field-group">
+      <div class="seg">
+        <label>梁型</label>
+        <div class="seg-btns" id="beamSeg">
+          <button data-v="simply" class="active">简支梁</button>
+          <button data-v="cantilever">悬臂梁</button>
+        </div>
+      </div>
+      <div class="seg">
+        <label>荷载类型</label>
+        <div class="seg-btns" id="loadSeg">
+          <button data-v="point" class="active">集中力 P</button>
+          <button data-v="udl">均布荷载 q</button>
+        </div>
+      </div>
+      <div class="seg">
+        <label>材料预设</label>
+        <div class="seg-btns" id="matSeg">
+          <button data-v="200" class="active">钢 E=200</button>
+          <button data-v="70">铝 E=70</button>
+          <button data-v="12">木 E=12</button>
+        </div>
+      </div>
+    </div>
+    <div class="field-group" style="margin-top:16px;">
+      <div class="slider"><label>跨度 L <span class="val" id="Lv"></span></label><input type="range" id="L" min="1" max="10" step="0.1" value="6"></div>
+      <div class="slider"><label>弹性模量 E <span class="val" id="Ev"></span></label><input type="range" id="E" min="10" max="210" step="1" value="200"></div>
+      <div class="slider"><label>惯性矩 I <span class="val" id="Iv"></span></label><input type="range" id="I" min="1" max="100" step="0.1" value="8.5"></div>
+      <div class="slider" id="sliderP"><label>集中力 P <span class="val" id="Pv"></span></label><input type="range" id="P" min="0" max="20" step="0.1" value="5"></div>
+      <div class="slider hidden" id="sliderQ"><label>均布荷载 q <span class="val" id="Qv"></span></label><input type="range" id="q" min="0" max="10" step="0.1" value="3"></div>
+      <div class="slider" id="sliderA"><label>荷载位置 a <span class="val" id="Av"></span></label><input type="range" id="a" min="0.05" max="5.95" step="0.05" value="3"></div>
+      <div class="checkbox" style="align-self:flex-end; padding-bottom:6px;">
+        <input type="checkbox" id="fdm"> <label for="fdm">叠加有限差分数值解（双路互验）</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关键结果 -->
+  <div class="tiles" id="tiles"></div>
+
+  <!-- 梁示意 -->
+  <div class="panel">
+    <svg id="beamSvg" viewBox="0 0 920 220" style="width:100%; height:220px; display:block;"></svg>
+  </div>
+
+  <!-- 三图联动 -->
+  <figure>
+    <figcaption><span class="swatch" style="background:var(--series-1);"></span>剪力图 V(x)</figcaption>
+    <canvas id="cvV"></canvas>
+  </figure>
+  <figure>
+    <figcaption><span class="swatch" style="background:var(--series-2);"></span>弯矩图 M(x)</figcaption>
+    <canvas id="cvM"></canvas>
+  </figure>
+  <figure>
+    <figcaption><span class="swatch" style="background:var(--series-3);"></span>挠曲线 w(x)（向下为正）</figcaption>
+    <canvas id="cvW"></canvas>
+    <div class="legend">
+      <span class="it"><span class="ln" style="background:var(--series-3);"></span>解析解</span>
+      <span class="it"><span class="ln" style="background:var(--series-4); border-top:2px dashed var(--series-4); height:0;"></span>有限差分数值解</span>
+    </div>
+  </figure>
+
+  <p class="note">
+    符号约定：弯矩以“下缘受拉为正”（简支梁为正、悬臂梁为负）；挠度向下为正。
+    解析解取教材经典闭式解，数值解由 <code>EI·w'''' = q(x)</code> 五点差分（N=200）独立求解，二者互验。<span id="fdmNote"></span>
+  </p>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+const state = {
+  beamType: "simply",   // simply | cantilever
+  loadType: "point",    // point | udl
+  L: 6, E: 200, I: 8.5, P: 5, q: 3, a: 3,
+  showFDM: false,
+  crossX: null,
+};
+
+// ---------- 解析解 ----------
+function compute() {
+  const { beamType: bt, loadType: lt, L, E, I, P, q, a } = state;
+  const EI = E * 1e9 * I * 1e-6;      // N·m²
+  const Pn = P * 1e3;                  // N
+  const qn = q * 1e3;                  // N/m
+  const Np = 500;
+  const xs = new Array(Np + 1);
+  const V = new Array(Np + 1), M = new Array(Np + 1), w = new Array(Np + 1);
+  let RA = 0, RB = 0, MA = 0;
+
+  for (let i = 0; i <= Np; i++) {
+    const x = L * i / Np;
+    xs[i] = x;
+    let v, m, ww;
+    if (bt === "simply") {
+      if (lt === "point") {
+        const b = L - a;
+        RA = Pn * b / L; RB = Pn * a / L; MA = 0;
+        if (x < a) {
+          v = RA; m = RA * x;
+          ww = Pn * b * x * (L * L - b * b - x * x) / (6 * EI * L);
+        } else {
+          v = RA - Pn; m = RA * x - Pn * (x - a);
+          ww = Pn * a * (L - x) * (L * L - a * a - (L - x) * (L - x)) / (6 * EI * L);
+        }
+      } else {
+        RA = RB = qn * L / 2; MA = 0;
+        v = qn * (L / 2 - x);
+        m = qn * x * (L - x) / 2;
+        ww = qn * x * (L * L * L - 2 * L * x * x + x * x * x) / (24 * EI);
+      }
+    } else { // cantilever, fixed at x=0
+      if (lt === "point") {
+        RA = Pn; RB = 0; MA = -Pn * L;
+        v = Pn; m = -Pn * (L - x);
+        ww = Pn * x * x * (3 * L - x) / (6 * EI);
+      } else {
+        RA = qn * L; RB = 0; MA = -qn * L * L / 2;
+        v = qn * (L - x); m = -qn * (L - x) * (L - x) / 2;
+        ww = qn * x * x * (6 * L * L - 4 * L * x + x * x) / (24 * EI);
+      }
+    }
+    V[i] = v / 1e3;          // kN
+    M[i] = m / 1e3;          // kN·m
+    w[i] = ww * 1e3;         // mm
+  }
+
+  // 极值
+  let Mmax = -Infinity, xM = 0, Mmag = -Infinity, xMmag = 0;
+  for (let i = 0; i <= Np; i++) {
+    if (Math.abs(M[i]) > Mmag) { Mmag = Math.abs(M[i]); xMmag = xs[i]; }
+    if (M[i] > Mmax) { Mmax = M[i]; xM = xs[i]; }
+  }
+  let wmax = -Infinity, xw = 0;
+  for (let i = 0; i <= Np; i++) { if (w[i] > wmax) { wmax = w[i]; xw = xs[i]; } }
+
+  // 有限差分数值解
+  let fdm = null;
+  if (state.showFDM && supportsFDM()) {
+    const N = 200, h = L / N;
+    const fw = solveFDM(N, h, EI, Pn, qn);
+    const wa = fw.map(v => v * 1e3); // mm
+    // 相对误差（L2 范数）
+    let num = 0, den = 0;
+    for (let i = 0; i <= N; i++) {
+      const x = L * i / N;
+      const wa_i = wAt(x) * 1e3; // analytic mm
+      num += (wa[i] - wa_i) ** 2; den += wa_i ** 2;
+    }
+    const err = den > 0 ? Math.sqrt(num / den) : 0;
+    fdm = { xs: Array.from({length:N+1}, (_,i)=>L*i/N), w: wa, err };
+  }
+  return { xs, V, M, w, RA: RA/1e3, RB: RB/1e3, MA: MA/1e3, Mmax, xM, MabsMax: Mmag, xMmag, wmax, xw, fdm };
+}
+
+function wAt(x) { // analytic deflection in meters at x
+  const { beamType: bt, loadType: lt, L, E, I, P, q, a } = state;
+  const EI = E * 1e9 * I * 1e-6, Pn = P * 1e3, qn = q * 1e3;
+  if (bt === "simply") {
+    if (lt === "point") {
+      const b = L - a;
+      if (x < a) return Pn * b * x * (L*L - b*b - x*x) / (6*EI*L);
+      return Pn * a * (L-x) * (L*L - a*a - (L-x)*(L-x)) / (6*EI*L);
+    }
+    return qn * x * (L*L*L - 2*L*x*x + x*x*x) / (24*EI);
+  }
+  if (lt === "point") return Pn * x*x * (3*L - x) / (6*EI);
+  return qn * x*x * (6*L*L - 4*L*x + x*x) / (24*EI);
+}
+
+function supportsFDM() {
+  // 悬臂 + 集中力(自由端) 暂不开放数值解（自由端剪力边界），其余开放
+  return !(state.beamType === "cantilever" && state.loadType === "point");
+}
+
+function solveFDM(N, h, EI, Pn, qn) {
+  const bt = state.beamType, lt = state.loadType;
+  let start, end;
+  if (bt === "simply") { start = 1; end = N - 1; }
+  else { start = 1; end = N; }
+  const n = end - start + 1;
+  const A = Array.from({length: n}, () => new Float64Array(n));
+  const b = new Float64Array(n);
+  const li = g => g - start;
+  function add(g2, coef) { // 累加全局节点 g2 的系数（已知零节点自动跳过）
+    if (g2 >= start && g2 <= end) A[row][li(g2)] += coef;
+    // else 已知边界 w=0，贡献为 0
+  }
+  let row = 0;
+  for (let g = start; g <= end; g++, row++) {
+    // RHS：分布荷载 h^4 q/EI；集中力按节点荷载 h^3 P/EI；悬臂自由端集中力 2h^3 P/EI
+    let rhs = 0;
+    if (bt === "simply") {
+      if (lt === "udl") rhs = h*h*h*h * qn / EI;
+      else { const i0 = Math.round(state.a / h); if (g === i0) rhs = h*h*h * Pn / EI; }
+    } else {
+      if (lt === "udl") rhs = h*h*h*h * qn / EI;
+      else { if (g === N) rhs = 2 * h*h*h * Pn / EI; }
+    }
+    b[row] = rhs;
+
+    // 五点模板 [1,-4,6,-4,1]，代入 ghost 边界
+    if (bt === "simply") {
+      if (g === 1) { add(1, 5); add(2, -4); add(3, 1); }
+      else if (g === N - 1) { add(N-3, 1); add(N-2, -4); add(N-1, 5); }
+      else { add(g-2,1); add(g-1,-4); add(g,6); add(g+1,-4); add(g+2,1); }
+    } else { // cantilever: 固支端 w[-1]=w[1]；自由端 w[N+1]=2w[N]-w[N-1]
+      if (g === 1) { add(1, 7); add(2, -4); add(3, 1); }
+      else if (g === N - 1) { add(N-3,1); add(N-2,-4); add(N-1,5); add(N,-2); }
+      else if (g === N) { add(N-2,2); add(N-1,-4); add(N,2); }
+      else { add(g-2,1); add(g-1,-4); add(g,6); add(g+1,-4); add(g+2,1); }
+    }
+  }
+  // 高斯消元（部分主元）
+  for (let k = 0; k < n; k++) {
+    let piv = k;
+    for (let i = k+1; i < n; i++) if (Math.abs(A[i][k]) > Math.abs(A[piv][k])) piv = i;
+    if (piv !== k) { [A[k], A[piv]] = [A[piv], A[k]]; const t = b[k]; b[k] = b[piv]; b[piv] = t; }
+    const d = A[k][k];
+    for (let i = k+1; i < n; i++) {
+      const f = A[i][k] / d;
+      for (let j = k; j < n; j++) A[i][j] -= f * A[k][j];
+      b[i] -= f * b[k];
+    }
+  }
+  const w = new Float64Array(n);
+  for (let i = n-1; i >= 0; i--) {
+    let s = b[i];
+    for (let j = i+1; j < n; j++) s -= A[i][j] * w[j];
+    w[i] = s / A[i][i];
+  }
+  // 展开到 0..N
+  const full = new Float64Array(N+1);
+  for (let g = start; g <= end; g++) full[g] = w[li(g)];
+  return full;
+}
+
+// ---------- 绘图 ----------
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function niceTicks(min, max, count = 5) {
+  if (min === max) { min -= 1; max += 1; }
+  const span = max - min, step0 = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const norm = step0 / mag;
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+  const t0 = Math.ceil(min / step) * step;
+  const ticks = [];
+  for (let v = t0; v <= max + 1e-9; v += step) ticks.push(v);
+  return ticks;
+}
+
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect();
+  cv.width = Math.round(rect.width * dpr);
+  cv.height = Math.round(rect.height * dpr);
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, W: rect.width, H: rect.height };
+}
+
+function drawChart(cv, kind, res) {
+  const { ctx, W, H } = setupCanvas(cv);
+  ctx.clearRect(0, 0, W, H);
+  const padL = 52, padR = 14, padT = 12, padB = 26;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const X = x => padL + (x - 0) / state.L * iw;
+
+  let data, color, ylabel, fmt;
+  if (kind === "V") { data = res.V; color = css("--series-1"); ylabel = "V (kN)"; fmt = v => v.toFixed(2); }
+  else if (kind === "M") { data = res.M; color = css("--series-2"); ylabel = "M (kN·m)"; fmt = v => v.toFixed(2); }
+  else { data = res.w; color = css("--series-3"); ylabel = "w (mm)"; fmt = v => v.toFixed(3); }
+
+  let ymin = Infinity, ymax = -Infinity;
+  for (const v of data) { if (v < ymin) ymin = v; if (v > ymax) ymax = v; }
+  if (kind !== "w") { if (ymin > 0) ymin = 0; if (ymax < 0) ymax = 0; } // V/M 含零点
+  else { ymin = Math.min(0, ymin); } // w 含 0
+  const padY = (ymax - ymin) * 0.12 || 1;
+  ymin -= padY; ymax += padY;
+  const Y = y => padT + (ymax - y) / (ymax - ymin) * ih;
+
+  // grid + ticks
+  const ticks = niceTicks(ymin, ymax, 5);
+  const tickFmt = v => { const a = Math.abs(v); if (a === 0) return "0"; if (a >= 100) return v.toFixed(0); if (a >= 10) return v.toFixed(1); return v.toFixed(2); };
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+  ctx.fillStyle = css("--text-muted"); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const t of ticks) {
+    const y = Y(t);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + iw, y); ctx.stroke();
+    ctx.fillText(tickFmt(t), padL - 6, y);
+  }
+  // x ticks
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let i = 0; i <= 5; i++) {
+    const x = state.L * i / 5;
+    ctx.fillText(x.toFixed(1) + "m", X(x), padT + ih + 6);
+  }
+  // zero / baseline
+  ctx.strokeStyle = css("--baseline"); ctx.lineWidth = 1;
+  const y0 = (ymin <= 0 && ymax >= 0) ? Y(0) : null;
+  if (y0 !== null) { ctx.beginPath(); ctx.moveTo(padL, y0); ctx.lineTo(padL + iw, y0); ctx.stroke(); }
+  // axis label
+  ctx.fillStyle = css("--text-secondary"); ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  ctx.fillText(ylabel, padL + 2, padT - 1);
+
+  // curve
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = X(res.xs[i]), y = Y(data[i]);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 数值解（w 图叠加虚线）
+  if (kind === "w" && res.fdm) {
+    ctx.strokeStyle = css("--series-4"); ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    for (let i = 0; i < res.fdm.xs.length; i++) {
+      const x = X(res.fdm.xs[i]), y = Y(res.fdm.w[i]);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // 十字光标 + 提示
+  if (state.crossX !== null) {
+    const x = state.crossX, px = X(x);
+    ctx.strokeStyle = css("--text-muted"); ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + ih); ctx.stroke(); ctx.setLineDash([]);
+    // 采样值
+    let val = data[0];
+    const frac = Math.min(1, Math.max(0, x / state.L)) * (data.length - 1);
+    const i0 = Math.floor(frac), i1 = Math.min(data.length - 1, i0 + 1), f = frac - i0;
+    val = data[i0] * (1 - f) + data[i1] * f;
+    const cy = Y(val);
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(px, cy, 3.5, 0, Math.PI * 2); ctx.fill();
+    // tooltip
+    const label = "x=" + x.toFixed(2) + "m  " + (kind==="w"?"w":"") + "=" + fmt(val) + (kind==="V"?" kN":kind==="M"?" kN·m":" mm");
+    ctx.font = "12px system-ui, sans-serif";
+    const tw = ctx.measureText(label).width + 16;
+    let tx = px + 10; if (tx + tw > W - 4) tx = px - tw - 10;
+    const ty = Math.max(4, cy - 18);
+    ctx.fillStyle = css("--surface"); ctx.strokeStyle = css("--border");
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(tx, ty, tw, 20, 4) : ctx.rect(tx, ty, tw, 20);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = css("--text-primary"); ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(label, tx + 8, ty + 10);
+  }
+}
+
+// ---------- 梁示意 ----------
+function drawBeam(res) {
+  const svg = $("beamSvg");
+  const bx = 120, bw = 680, by = 120, bh = 14; // 梁体
+  const col = {
+    beam: css("--text-primary"),
+    ink: css("--text-primary"),
+    sec: css("--text-secondary"),
+    load: css("--series-2"),
+    react: css("--series-3"),
+    deform: css("--deform"),
+    grid: css("--grid"),
+  };
+  let s = "";
+  const X = x => bx + (x / state.L) * bw;
+
+  // 地面
+  s += `<line x1="${bx-30}" y1="${by+40}" x2="${bx+bw+30}" y2="${by+40}" stroke="${col.grid}" stroke-width="2"/>`;
+
+  // 梁体
+  s += `<rect x="${bx}" y="${by-bh/2}" width="${bw}" height="${bh}" rx="3" fill="none" stroke="${col.beam}" stroke-width="2"/>`;
+
+  // 支承
+  if (state.beamType === "simply") {
+    const sx = bx + 8, ex = bx + bw - 8;
+    // 左：固定铰（三角形）
+    s += `<path d="M${sx-16} ${by+bh/2} L${sx+16} ${by+bh/2} L${sx} ${by+bh/2+22} Z" fill="none" stroke="${col.ink}" stroke-width="2"/>`;
+    // 右：滚动铰（三角形 + 圆）
+    s += `<path d="M${ex-16} ${by+bh/2} L${ex+16} ${by+bh/2} L${ex} ${by+bh/2+22} Z" fill="none" stroke="${col.ink}" stroke-width="2"/>`;
+    s += `<circle cx="${ex-10}" cy="${by+bh/2+27}" r="4" fill="none" stroke="${col.ink}"/><circle cx="${ex+10}" cy="${by+bh/2+27}" r="4" fill="none" stroke="${col.ink}"/>`;
+    // 支反力
+    s += `<path d="M${sx} ${by+bh/2+22} L${sx} ${by+bh/2+6}" stroke="${col.react}" stroke-width="2" marker-end="url(#arrR)"/>`;
+    s += `<path d="M${ex} ${by+bh/2+27} L${ex} ${by+bh/2+6}" stroke="${col.react}" stroke-width="2" marker-end="url(#arrR)"/>`;
+  } else {
+    // 固支：墙 + 斜线
+    const fx = bx - 6;
+    s += `<line x1="${fx}" y1="${by-bh}" x2="${fx}" y2="${by+bh}" stroke="${col.ink}" stroke-width="5"/>`;
+    s += `<path d="M${fx} ${by-bh} l-12 -6 M${fx} ${by-2} l-12 -6 M${fx} ${by+bh-2} l-12 -6" stroke="${col.ink}" stroke-width="2"/>`;
+    // 固端反力（省略，读数值给出）
+  }
+
+  // 荷载
+  if (state.loadType === "point") {
+    const px = X(state.beamType === "cantilever" ? state.L : state.a);
+    const len = 46;
+    s += `<line x1="${px}" y1="${by-bh/2-8-len}" x2="${px}" y2="${by-bh/2-8}" stroke="${col.load}" stroke-width="2.5" marker-end="url(#arrP)"/>`;
+    s += `<text x="${px}" y="${by-bh/2-14-len}" text-anchor="middle" fill="${col.load}" font-size="13" font-weight="600">P</text>`;
+  } else {
+    const n = 9;
+    for (let i = 1; i <= n; i++) {
+      const px = bx + (i - 0.5) * bw / n;
+      s += `<line x1="${px}" y1="${by-bh/2-6-24}" x2="${px}" y2="${by-bh/2-6}" stroke="${col.load}" stroke-width="1.8" marker-end="url(#arrP)"/>`;
+    }
+    s += `<line x1="${bx}" y1="${by-bh/2-30}" x2="${bx+bw}" y2="${by-bh/2-30}" stroke="${col.load}" stroke-width="1" stroke-dasharray="3 3"/>`;
+    s += `<text x="${bx+bw/2}" y="${by-bh/2-36}" text-anchor="middle" fill="${col.load}" font-size="13" font-weight="600">q</text>`;
+  }
+
+  // 变形曲线（放大）
+  const scale = (bw * 0.18) / (Math.max(0.0001, res.wmax));
+  let d = "";
+  for (let i = 0; i <= 200; i++) {
+    const x = state.L * i / 200;
+    const wi = wAt(x) * 1e3; // mm
+    const px = X(x), py = by + bh/2 + wi * scale;
+    d += (i === 0 ? "M" : "L") + px.toFixed(1) + " " + py.toFixed(1) + " ";
+  }
+  s += `<path d="${d}" fill="none" stroke="${col.deform}" stroke-width="2"/>`;
+  const scaleTxt = (res.wmax < 1e-4) ? "（无变形）"
+    : (scale >= 10 ? Math.round(scale) : (scale >= 1 ? scale.toFixed(1) : scale.toFixed(2)));
+  s += `<text x="${bx+bw/2}" y="${by+60}" text-anchor="middle" fill="${col.deform}" font-size="12">变形示意（放大系数 ${scaleTxt}×）</text>`;
+
+  // 尺寸标注
+  s += `<line x1="${bx}" y1="${by+52}" x2="${bx+bw}" y2="${by+52}" stroke="${col.sec}" stroke-width="1"/>`;
+  s += `<text x="${bx+bw/2}" y="${by+66}" text-anchor="middle" fill="${col.sec}" font-size="12">L = ${state.L} m</text>`;
+
+  // 箭头标记
+  s = `<defs>
+    <marker id="arrP" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="${col.load}"/></marker>
+    <marker id="arrR" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="${col.react}"/></marker>
+  </defs>` + s;
+  svg.innerHTML = s;
+}
+
+// ---------- 读数值 ----------
+function drawTiles(res) {
+  const fdmErr = res.fdm ? (res.fdm.err * 100) : null;
+  const tiles = [
+    state.beamType === "simply"
+      ? { k: "支反力 R_A", v: res.RA.toFixed(2), u: "kN（向上）" }
+      : { k: "固端反力 R_A", v: res.RA.toFixed(2), u: "kN" },
+    state.beamType === "simply"
+      ? { k: "支反力 R_B", v: res.RB.toFixed(2), u: "kN（向上）" }
+      : { k: "固端弯矩 M_A", v: res.MA.toFixed(2), u: "kN·m" },
+    { k: "最大弯矩 |M|max", v: res.MabsMax.toFixed(2), u: "kN·m · x=" + res.xMmag.toFixed(2) + "m" },
+    { k: "最大挠度 wmax", v: res.wmax.toFixed(3), u: "mm · x=" + res.xw.toFixed(2) + "m" },
+  ];
+  if (fdmErr !== null) tiles.push({ k: "解析 vs 数值", v: fdmErr.toFixed(3) + "%", u: "L2 相对误差", good: fdmErr < 1 });
+  $("tiles").innerHTML = tiles.map(t =>
+    `<div class="tile"><div class="k">${t.k}</div><div class="v ${t.good ? 'err-good' : ''}">${t.v}</div><div class="u">${t.u}</div></div>`
+  ).join("");
+}
+
+// ---------- 联动 ----------
+function update() {
+  const res = compute();
+  drawTiles(res);
+  drawBeam(res);
+  drawChart($("cvV"), "V", res);
+  drawChart($("cvM"), "M", res);
+  drawChart($("cvW"), "w", res);
+  $("fdmNote").textContent = state.showFDM
+    ? (supportsFDM() ? "当前已叠加数值解并显示两者相对误差。" : "数值解暂不支持“悬臂梁+自由端集中力”工况。")
+    : "";
+}
+
+// ---------- 事件 ----------
+function wireSeg(segId, cb) {
+  const el = $(segId);
+  el.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...el.children].forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    cb(b.dataset.v);
+  });
+}
+wireSeg("beamSeg", v => { state.beamType = v; syncSliders(); update(); });
+wireSeg("loadSeg", v => { state.loadType = v; syncSliders(); update(); });
+wireSeg("matSeg", v => { state.E = +v; $("E").value = v; update(); });
+
+function bindRange(id, key, fmt, extra) {
+  const el = $(id);
+  el.addEventListener("input", () => { state[key] = +el.value; if (extra) extra(); update(); });
+}
+function bindA() {
+  const L = state.L, a = state.a;
+  $("a").min = (0.05).toFixed(2); $("a").max = (L - 0.05).toFixed(2);
+  if (state.a > L - 0.05) { state.a = L - 0.05; $("a").value = state.a; }
+  if (state.a < 0.05) { state.a = 0.05; $("a").value = state.a; }
+}
+bindRange("L", "L", v => v.toFixed(1) + " m", bindA);
+bindRange("E", "E", v => v + " GPa");
+bindRange("I", "I", v => v.toFixed(1) + " ×10⁻⁶ m⁴");
+bindRange("P", "P", v => v.toFixed(1) + " kN");
+bindRange("q", "q", v => v.toFixed(1) + " kN/m");
+bindRange("a", "a", v => v.toFixed(2) + " m");
+
+$("fdm").addEventListener("change", e => { state.showFDM = e.target.checked; update(); });
+
+function syncSliders() {
+  const point = state.loadType === "point";
+  $("sliderP").classList.toggle("hidden", !point);
+  $("sliderQ").classList.toggle("hidden", point);
+  $("sliderA").classList.toggle("hidden", !point || state.beamType === "cantilever");
+  // 悬臂集中力：位置固定在自由端
+  if (state.beamType === "cantilever" && state.loadType === "point") state.a = state.L;
+}
+
+// 十字光标联动
+function wireCrosshair(cv) {
+  cv.addEventListener("mousemove", e => {
+    const rect = cv.getBoundingClientRect();
+    const padL = 52, padR = 14;
+    const iw = rect.width - padL - padR;
+    const fx = (e.clientX - rect.left - padL) / iw;
+    state.crossX = Math.min(state.L, Math.max(0, fx * state.L));
+    update();
+  });
+  cv.addEventListener("mouseleave", () => { if (state.crossX !== null) { state.crossX = null; update(); } });
+}
+wireCrosshair($("cvV")); wireCrosshair($("cvM")); wireCrosshair($("cvW"));
+
+window.addEventListener("resize", () => { if (state.crossX !== null) state.crossX = null; update(); });
+
+// 初始化
+syncSliders();
+update();
+</script>
+</body>
+</html>
